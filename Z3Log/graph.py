@@ -1,40 +1,49 @@
 import subprocess
 import networkx as nx
 import re
-
 from .config.path import *
 from .config.config import *
+
 from .argument import Arguments
 
 
 class Graph:
-    def __init__(self, benchmark_name, is_clean=False):
+    def __init__(self, benchmark_name, is_clean: bool = False, address: str = None):
         """
         takes in a circuit and creates a networkx graph out of it
         :param benchmark_name: the input benchmark in gv format
         :param is_clean: leave empty for now
         """
         self.__graph_name = benchmark_name
-        folder, extension = INPUT_PATH['gv']
+        folder, extension = INPUT_PATH['gv'] # input/gv/
         self.__graph_in_path = f'{folder}/{benchmark_name}.{extension}'
 
-        folder, extension = OUTPUT_PATH['gv']
+        folder, extension = OUTPUT_PATH['gv'] # output/gv
         self.__graph_out_path = f'{folder}/{benchmark_name}.{extension}'
 
-        folder, extension = OUTPUT_PATH['dot']
+        folder, extension = OUTPUT_PATH['dot'] # output/gv
         self.__dot_in_path = f'{folder}/{benchmark_name}.{extension}'
 
-        folder, extension = OUTPUT_PATH['ver']
+        folder, extension = OUTPUT_PATH['ver'] # output/ver
         self.__verilog_in_path = f'{folder}/{benchmark_name}.{extension}'
+
         print(f'Converting the graph into a NeworkX object')
-        self.__graph = self.import_graph()
+
+
+        self.__graph = self.import_graph(address)
 
         self.__sorted_node_list = None
 
         self.__is_clean = is_clean
+
+
         if not self.is_clean:
+            print(f'We are cleaning!')
             self.clean_graph()
-        # self.count_iog()
+
+        # print(f'After cleaning!')
+        # for n in self.graph.nodes:
+        #     print(f'{n = }, {self.graph.nodes[n] = }')
         self.sort_graph()
 
         self.__input_dict = self.extract_inputs()
@@ -186,7 +195,6 @@ class Graph:
         :return: a sorted list of node labels
         """
         sorted_node_list = list(nx.topological_sort(self.graph))
-
         sort_map = {}
         idx = 0
         for n in sorted_node_list:
@@ -197,6 +205,7 @@ class Graph:
             elif re.search(r'g\d+', n):
                 sort_map[n] = f'g{idx}'
                 idx += 1
+
         return sort_map
 
     def sort_graph(self):
@@ -265,6 +274,7 @@ class Graph:
         self.set_gate_dict(self.extract_gates())
         self.set_constant_dict(self.extract_constants())
 
+
     def delete_extra_fields(self):
         for n in self.graph.nodes:
             for field in REDUNDANT_FIELDS:
@@ -285,6 +295,7 @@ class Graph:
     def clean_output_labels(self):
         for n in self.graph.nodes:
             if self.is_po(n):
+
                 idx = re.search('\d+', self.graph.nodes[n]['label']).group()  # po12 => idx=12
                 self.graph.nodes[n]['label'] = f'out{idx}'
                 self.graph.nodes[n]['shape'] = f'doublecircle'
@@ -303,8 +314,7 @@ class Graph:
                     cur_gate = re.search(POSSIBLE_GATES, self.graph.nodes[n]['label']).group()
                     self.graph.nodes[n]['label'] = cur_gate
                     self.graph.nodes[n]['shape'] = 'invhouse'
-        # for n in self.graph.nodes:
-        #     print(f'{n = }')
+
 
     def clean_constant_labels(self):
         # g16[label = "F", shape = circle, fillcolor = white]
@@ -326,8 +336,9 @@ class Graph:
     def merge_wires_into_gates(self):
         tmp_graph = self.graph.copy(as_view=False)
         for e in self.graph.edges:
-            if (re.search(POSSIBLE_GATES, self.graph.nodes[e[0]]['label']) and
-                    re.search('g\d+', self.graph.nodes[e[1]]['label'])):
+            # if (re.search(POSSIBLE_GATES, self.graph.nodes[e[0]]['label']) and
+            #         re.search('g\d+', self.graph.nodes[e[1]]['label'])):
+            if re.search('g\d+', self.graph.nodes[e[1]]['label']):
                 src_node = e[0]
                 des_node = e[1]
                 tmp_graph = nx.contracted_nodes(tmp_graph, src_node, des_node, self_loops=False)
@@ -338,36 +349,28 @@ class Graph:
         gate_idx = 0
         for n in self.graph.nodes:
             if self.is_cleaned_pi(n):
-                # print(f"{self.graph.nodes[n]['label'] = } is a PI")
                 old_name = n
                 new_name = self.graph.nodes[n]['label']
-                # print(old_name)
 
                 mapping = {old_name: new_name}
                 tmp_graph = nx.relabel_nodes(tmp_graph, mapping)
             elif self.is_cleaned_po(n):
-                # print(f"{self.graph.nodes[n]['label'] = } is a PO")
                 old_name = n
                 new_name = self.graph.nodes[n]['label']
-                # print(old_name)
 
                 mapping = {old_name: new_name}
                 tmp_graph = nx.relabel_nodes(tmp_graph, mapping)
             elif self.is_merged_gate(n):
-                # print(f"{self.graph.nodes[n]['label'] = } is a merged gate!")
                 old_name = n
                 new_name = f'g{gate_idx}'
                 gate_idx += 1
-                # print(old_name)
 
                 mapping = {old_name: new_name}
                 tmp_graph = nx.relabel_nodes(tmp_graph, mapping)
             elif self.is_cleaned_gate(n):
-                # print(f"{self.graph.nodes[n]['label'] = } is a cleaned gate!")
                 old_name = n
                 new_name = f'g{gate_idx}'
                 gate_idx += 1
-                # print(old_name)
 
                 mapping = {old_name: new_name}
                 tmp_graph = nx.relabel_nodes(tmp_graph, mapping)
@@ -375,7 +378,6 @@ class Graph:
                 old_name = n
                 new_name = f'g{gate_idx}'
                 gate_idx += 1
-                # print(old_name)
 
                 mapping = {old_name: new_name}
                 tmp_graph = nx.relabel_nodes(tmp_graph, mapping)
@@ -384,8 +386,6 @@ class Graph:
 
         self.set_graph(tmp_graph)
 
-        # for n in self.graph.nodes:
-        #     print(f'{n = }, {self.graph.nodes[n] = }')
 
     def is_cleaned_pi(self, node):
         if not self.is_constant(node):
@@ -408,8 +408,8 @@ class Graph:
 
     def is_pi(self, node):
         if not self.is_constant(node):
-            if re.search(r'pi\d+|in\d+', self.graph.nodes[node][LABEL]):
-                # print(f'{node} is and input')
+            if re.search(r'pi\d+', self.graph.nodes[node][LABEL]) or \
+                self.graph.nodes[node][LABEL].startswith('in'):
                 return True
             else:
                 return False
@@ -419,6 +419,7 @@ class Graph:
     def is_cleaned_po(self, node):
         if not self.is_constant(node):
             if re.search(r'out\d+', self.graph.nodes[node][LABEL]):
+
                 return True
             else:
                 return False
@@ -427,7 +428,8 @@ class Graph:
 
     def is_po(self, node):
         if not self.is_constant(node):
-            if re.search(r'po\d+|out\d+', self.graph.nodes[node][LABEL]):
+            if re.search(r'po\d+', self.graph.nodes[node][LABEL]) or \
+               self.graph.nodes[node][LABEL].startswith('out'):
                 return True
             else:
                 return False
@@ -484,7 +486,6 @@ class Graph:
             return True
         elif re.search(r'(TRUE|FALSE)', self.graph.nodes[node][LABEL]):
             regex_constant = re.search(f'', self.graph.nodes[node][LABEL]).group()
-            # print(f'{node = }, {self.graph.nodes[node] = } is a {regex_constant = }')
             return True
         else:
             return False
@@ -517,8 +518,16 @@ class Graph:
         else:
             return False
 
-    def import_graph(self):
-        DG = nx.drawing.nx_agraph.read_dot(self.out_path)
+    def import_graph(self, address: str = None):
+        """
+        :param address: the location of the gv file. default is self.out_path (output/gv/)
+        :return: the graph object of networkx
+        """
+
+        if address:
+            DG = nx.drawing.nx_agraph.read_dot(address)
+        else:
+            DG = nx.drawing.nx_agraph.read_dot(self.out_path)
         return DG
 
     def export_graph(self):
@@ -544,7 +553,7 @@ class Graph:
             line = f"{n} [label=\"{self.graph.nodes[n]['label']}\\n{n}\", shape={self.graph.nodes[n]['shape']}];\n"
         else:
             print('WARNING!!! found a node that is not a PI, PO, WIRE, CONSTANT, GATE')
-            # print(f'{n = }, {self.graph.nodes[n] = }')
+            raise Exception('NodeTypeError')
 
         file_handler.write(line)
 

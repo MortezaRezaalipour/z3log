@@ -11,7 +11,7 @@ from .graph import *
 class Z3solver:
     def __init__(self, benchmark_name: str, approximate_benchmark_name: str = None, samples: list = [],
                  experiment: str = SINGLE,
-                 pruned_percentage: int = None, pruned_gates=None, metric: str = WAE, precision: int = 2,
+                 pruned_percentage: int = None, pruned_gates=None, metric: str = WAE, precision: int = 4,
                  optimization: str = None):
         """
 
@@ -30,7 +30,7 @@ class Z3solver:
 
         folder, extension = LOG_PATH['z3']
         os.makedirs(f'{folder}/{benchmark_name}_{Z3}_{LOG}', exist_ok=True)
-        self.__z3_log_path = f'{folder}/{benchmark_name}_{Z3}_{LOG}/{benchmark_name}_{Z3}.{extension}'
+        self.__z3_log_path = f'{folder}/{benchmark_name}_{Z3}_{LOG}/{benchmark_name}_{Z3}_{LOG}.{extension}'
 
         self.__approximate_verilog_in_path = None
         self.__approximate_graph = None
@@ -200,9 +200,7 @@ class Z3solver:
         self.__sample_results = results
 
     def import_results(self):
-        # print(f'importing results...')
         arr = []
-        print(f"{self.pyscript_results_out_path = }")
         with open(self.pyscript_results_out_path, 'r') as f:
             lines = f.readlines()
             for line in lines:
@@ -1218,11 +1216,6 @@ class Z3solver:
         return kind_bisection_strategy
 
     def export_z3pyscript(self):
-        """
-        Exports the contents of the property "self.z3pyscript", the circuit expressed in the form of z3py constraints,
-        onto a file located at "self.out_path"
-        :return: Nothing
-        """
         with open(self.out_path, 'w') as z:
             z.writelines(self.z3pyscript)
 
@@ -1530,15 +1523,14 @@ class Z3solver:
     # TODO: decorators-----------------------------
     def run_z3pyscript_qor(self):
         with open(self.z3_log_path, 'w') as f:
-            process = subprocess.run([PYTHON3, self.out_path], stdout=PIPE, stderr=PIPE)
-
+            process = subprocess.run([PYTHON3, self.out_path],  stderr=PIPE, stdout=PIPE)
 
     def run_z3pyscript_labeling(self):
         # print(self.pyscript_files_for_labeling )
         for pyscript in self.pyscript_files_for_labeling:
             with open(self.z3_log_path, 'w') as f:
                 # process = subprocess.run([PYTHON3, pyscript], stdout=PIPE, stderr=PIPE)
-                process = subprocess.run([PYTHON3, pyscript], stderr=PIPE)
+                process = subprocess.run([PYTHON3, pyscript], stderr=PIPE, stdout=PIPE)
 
     def run_z3pyscript_random(self):
         with open(self.z3_log_path, 'w') as f:
@@ -1547,8 +1539,7 @@ class Z3solver:
     def run_z3pyscript_test(self):
         with open(self.z3_log_path, 'w') as f:
             # process = subprocess.run([PYTHON3, self.out_path], stdout=PIPE, stderr=PIPE)
-            process = subprocess.run([PYTHON3, self.out_path], stderr=PIPE)
-
+            process = subprocess.run([PYTHON3, self.out_path], stderr=PIPE, stdout=PIPE)
 
         self.set_sample_results(self.import_results())
     # TODO: decorators (end)--------------------------
