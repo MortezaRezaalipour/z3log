@@ -13,9 +13,8 @@ import networkx as nx
 from subprocess import PIPE, Popen
 from .utils import *
 from .graph import *
-
-
-
+from jinja2 import Environment, FileSystemLoader
+import random
 
 
 class Z3solver:
@@ -23,7 +22,7 @@ class Z3solver:
                  experiment: str = SINGLE,
                  pruned_percentage: int = None, pruned_gates=None, metric: str = WAE, precision: int = 4,
                  optimization: str = None, style: str = 'max',
-                 parallel:bool = False, partial: bool = True):
+                 parallel: bool = False, partial: bool = True):
         """
 
         :param benchmark_name: the input benchmark in gv format
@@ -36,7 +35,6 @@ class Z3solver:
         self.__graph_in_path = f'{folder}/{benchmark_name}.{extension}'
 
         self.__graph = Graph(benchmark_name, True)
-
 
         self.__pyscript_results_out_path = None
 
@@ -61,7 +59,6 @@ class Z3solver:
             self.approximate_graph.set_constant_dict(self.approximate_graph.extract_constants())
 
             self.__labeling_graph = copy.deepcopy(self.approximate_graph)
-
 
         self.__experiment = experiment
         self.__pruned_percentage = None
@@ -106,7 +103,6 @@ class Z3solver:
         # print(f'{self.approximate_graph.num_constants = }')
         # print(f'{self.approximate_graph.num_outputs =}')
 
-
     @property
     def partial(self):
         return self.__partial
@@ -115,18 +111,15 @@ class Z3solver:
     def labels(self):
         return self.__labels
 
-
     def append_label(self, key, value):
         if key not in self.__labels:
             self.__labels[key] = value
         else:
             print(Fore.LIGHTRED_EX + f'Error! key={key} already exists in the labels dictionary!' + Style.RESET_ALL)
 
-
     @property
     def parallel(self):
         return self.__parallel
-
 
     @property
     def style(self):
@@ -258,11 +251,30 @@ class Z3solver:
 
     def set_sample_results(self, results):
         self.__sample_results = results
+    def export_labelled_graph(self):
+        print(f'{self.labels = }')
+        for node in self.graph.graph.nodes:
+            if node in self.labels.keys():
+                self.graph.graph.nodes[node]['label'] += f'\\n{self.labels[node]}'
+                # print(f'{self.graph.graph.nodes[node]["label"]}')
+        with open(self.graph.out_path, 'w') as f:
+            f.write(f"strict digraph \"\" {{\n")
+            for n in self.graph.graph.nodes:
+                print(f"{self.graph.graph.nodes[n]['label'] = }")
+                if self.graph.is_cleaned_pi(n) or self.graph.is_cleaned_po(n):
 
+                    line = f"{n} [label=\"{self.graph.graph.nodes[n]['label']}\", shape={self.graph.graph.nodes[n]['shape']}];\n"
+                elif self.graph.is_cleaned_gate(n):
 
+                    line = f"{n} [label=\"{self.graph.graph.nodes[n]['label']}\", shape={self.graph.graph.nodes[n]['shape']}];\n"
+                elif self.graph.is_cleaned_constant(n):
 
-
-
+                    line = f"{n} [label=\"{self.graph.graph.nodes[n]['label']}\", shape={self.graph.graph.nodes[n]['shape']}];\n"
+                f.write(line)
+            for e in self.graph.graph.edges:
+                self.graph.export_edge(e, f)
+            f.write(f"}}\n")
+        pass
 
     def is_input(self, node, graph):
         if graph.graph.nodes[node][SHAPE] == INPUT_SHAPE and re.search('in\d+', node):
@@ -302,9 +314,6 @@ class Z3solver:
         else:
             return [Int("approx_%s%s" % (prefix, i), ctx) for i in range(sz)]
 
-
-
-
     def BoolVector(self, prefix, sz, ctx=None, exact: bool = True):
         """Return a list of Boolean constants of size `sz`.
 
@@ -339,7 +348,8 @@ class Z3solver:
                 if len(predecessor_list) == 1:
                     exact_circuit.append(Bool(node, ctx=ctx) == Not(Bool(predecessor_list[0], ctx=ctx), ctx=ctx))
                 elif len(predecessor_list) == 2:
-                    exact_circuit.append(Bool(node, ctx=ctx) == And(Bool(predecessor_list[0], ctx=ctx), Bool(predecessor_list[1], ctx=ctx)))
+                    exact_circuit.append(Bool(node, ctx=ctx) == And(Bool(predecessor_list[0], ctx=ctx),
+                                                                    Bool(predecessor_list[1], ctx=ctx)))
             elif self.is_constant(node, self.graph):
                 constant = self.graph.graph.nodes[node][LABEL].split('\\')[0]  # 'FALSE\\ng0' -> ['FALSE', 'ng0']
                 assert constant in Z3_GATES_DICTIONARY, Fore.RED + f'ERROR!!! in ({__name__}): functionality of node {node} is unknown!' + Style.RESET_ALL
@@ -355,7 +365,6 @@ class Z3solver:
                 print(Fore.RED + f'ERROR!!! in ({__name__}): node {node} is unknown!' + Style.RESET_ALL)
 
         return exact_circuit
-
 
     def convert_approximate_to_implicit_z3_constraints(self, removed_node: str = None, ctx=None):
         approx_circuit = []
@@ -374,7 +383,8 @@ class Z3solver:
                         approx_circuit.append(Bool(node, ctx=ctx) == Not(Bool(predecessor_list[0], ctx=ctx)))
                     elif len(predecessor_list) == 2:
                         # node = And(Bool(predecessor_list[0]), Bool(predecessor_list[1]))
-                        approx_circuit.append(Bool(node, ctx=ctx) == And(Bool(predecessor_list[0], ctx=ctx), Bool(predecessor_list[1], ctx=ctx)))
+                        approx_circuit.append(Bool(node, ctx=ctx) == And(Bool(predecessor_list[0], ctx=ctx),
+                                                                         Bool(predecessor_list[1], ctx=ctx)))
                 else:
                     # print(f'{node} is left as a free variable!')
                     pass
@@ -400,30 +410,25 @@ class Z3solver:
                 print(Fore.RED + f'ERROR!!! in ({__name__}): node {node} is unknown!' + Style.RESET_ALL)
         return approx_circuit
 
-
-    def integer_circuit_output_to_implicit_z3_constriants(self, integer_out_list, exact : bool = True, ctx=None):
+    def integer_circuit_output_to_implicit_z3_constriants(self, integer_out_list, exact: bool = True, ctx=None):
         if exact:
             exact_out = Int('exact_out', ctx=ctx)
             exact_out = IntVal('0', ctx=ctx)
             for i, out in enumerate(integer_out_list):
-
-
-                exact_out += out* (IntVal(2**i, ctx=ctx) * 2/2)
+                exact_out += out * (IntVal(2 ** i, ctx=ctx) * 2 / 2)
 
             return exact_out
         else:
             approx_out = Int('approx_out', ctx=ctx)
             approx_out = IntVal('0', ctx=ctx)
             for i, out in enumerate(integer_out_list):
-                approx_out += out * (IntVal(2 ** i,  ctx=ctx) * 2/2)
+                approx_out += out * (IntVal(2 ** i, ctx=ctx) * 2 / 2)
 
             return approx_out
 
     def labler_wrapper(self, args):
-        labler, node , queue = args
+        labler, node, queue = args
         labler(node, queue)
-
-
 
     def run_implicit_labeling(self):
         labler = self.implicit_labeling
@@ -473,39 +478,35 @@ class Z3solver:
             node, weight = node_weight
             self.append_label(node, weight)
 
-
-
-
-    def implicit_labeling(self, removed_node: str = None, queue = None, this_ctx=None):
+    def implicit_labeling(self, removed_node: str = None, queue=None, this_ctx=None):
         st = time.time()
         if this_ctx is None:
-
             this_ctx = Context()
         s = Optimize(ctx=this_ctx)
         assert s.ctx == this_ctx
         et = time.time()
         # print(f'define solver time = {et - st}')
         st = time.time()
-        f_exact = Function('f_exact', IntSort( ctx=this_ctx), IntSort( ctx=this_ctx))
-        f_approx = Function('f_approx', IntSort( ctx=this_ctx), IntSort( ctx=this_ctx))
-        f_error = Function('f_error', IntSort( ctx=this_ctx), IntSort( ctx=this_ctx), IntSort( ctx=this_ctx))
+        f_exact = Function('f_exact', IntSort(ctx=this_ctx), IntSort(ctx=this_ctx))
+        f_approx = Function('f_approx', IntSort(ctx=this_ctx), IntSort(ctx=this_ctx))
+        f_error = Function('f_error', IntSort(ctx=this_ctx), IntSort(ctx=this_ctx), IntSort(ctx=this_ctx))
         input_list_exact = self.BoolVector('in', self.graph.num_inputs, exact=True, ctx=this_ctx)
 
-        gate_list_exact = self.BoolVector('g', self.graph.num_constants + self.graph.num_gates, exact=True, ctx=this_ctx)
+        gate_list_exact = self.BoolVector('g', self.graph.num_constants + self.graph.num_gates, exact=True,
+                                          ctx=this_ctx)
         output_list_exact = self.BoolVector('out', self.graph.num_outputs, exact=True, ctx=this_ctx)
         exact_circuit = self.convert_exact_to_implicit_z3_constraints(ctx=this_ctx)
-        exact_output = self.integer_circuit_output_to_implicit_z3_constriants(output_list_exact, exact=True, ctx=this_ctx)
+        exact_output = self.integer_circuit_output_to_implicit_z3_constriants(output_list_exact, exact=True,
+                                                                              ctx=this_ctx)
 
-
-
-
-        gate_list_approx = self.BoolVector('g', self.approximate_graph.num_constants + self.approximate_graph.num_gates, exact=False, ctx=this_ctx)
+        gate_list_approx = self.BoolVector('g', self.approximate_graph.num_constants + self.approximate_graph.num_gates,
+                                           exact=False, ctx=this_ctx)
         output_list_approx = self.BoolVector('out', self.approximate_graph.num_outputs, exact=False, ctx=this_ctx)
         approx_circuit = self.convert_approximate_to_implicit_z3_constraints(removed_node, ctx=this_ctx)
-        approx_output = self.integer_circuit_output_to_implicit_z3_constriants(output_list_approx, exact=False, ctx=this_ctx)
+        approx_output = self.integer_circuit_output_to_implicit_z3_constriants(output_list_approx, exact=False,
+                                                                               ctx=this_ctx)
 
         et = time.time()
-
 
         st = time.time()
         # s.add(input_list_exact)
@@ -514,11 +515,8 @@ class Z3solver:
         # s.add(gate_list_approx)
         # s.add(output_list_approx)
 
-
         s.add(exact_circuit)
         s.add(approx_circuit)
-
-
 
         if self.style == 'max':
             foundWCE = False
@@ -527,12 +525,12 @@ class Z3solver:
             s.add(f_exact(exact_output) == exact_output)
             s.add(f_approx(approx_output) == approx_output)
             s.add(f_error(exact_output, approx_output) == Abs(exact_output - approx_output))
-            while(not foundWCE):
-
+            while (not foundWCE):
 
                 s.push()
                 s.add(f_error(exact_output, approx_output) > wce)
                 s.maximize(f_error(exact_output, approx_output))
+
 
                 # print(f'adding constraints time = {et - st}')
 
@@ -572,7 +570,7 @@ class Z3solver:
             # print(f'adding constraints time = {et - st}')
             c = s.check()
             et = time.time()
-            runtime = et  -  st
+            runtime = et - st
             if c == sat:
                 bce = abs((s.model()[f_error].else_value().as_long()))
             else:
@@ -586,10 +584,8 @@ class Z3solver:
                 print(f'{removed_node} is done labeling!')
                 return bce
 
-
     def evaluate(self):
         return self.implicit_labeling()
-
 
     def partial_labeling(self):
         pass
@@ -633,9 +629,146 @@ class Z3solver:
     def labeling_graph(self):
         return self.__labeling_graph
 
-
     def _get_next_gate(self):
         pass
+
+    def jinja2_generate_potential_pruned_gates(self, pruning_percentage=None):
+        """
+            Generates a list of gate names to be pruned based on a specified percentage.
+
+            This function selects a random subset of gates from the circuit based on the provided percentage.
+            The returned list contains the names of gates (e.g., 'g0', 'g10') to be pruned.
+
+            Args:
+                percentage (float): The percentage of total gates to select for pruning (0 to 100).
+
+            Returns:
+                list: A list of gate names (e.g., ['g0', 'g10']) selected for pruning.
+            """
+        #TODO: make sure that gates from msb side are picked more often
+        gates_list = []
+        if not self.pruned_percentage:
+            percentage = pruning_percentage
+        else:
+            percentage = self.pruned_percentage
+        all_gates = [gate for gate in self.graph.gate_dict.values()]
+        num_gates_to_prune = max(1, int(len(all_gates) * (percentage / 100.0)))
+        gates_list = random.sample(all_gates, num_gates_to_prune)
+        return  gates_list
+    def jinja2_create_randomly_pruned_graph(self):
+        pruned_gates = self.jinja2_generate_potential_pruned_gates()
+        self.pruned_graph = copy.deepcopy(self.graph)
+        constant_nodes = {}
+        # Remove the selected gates from the pruned graph
+        for del_node in pruned_gates:
+
+            constant = random.choice(['TRUE', 'FALSE'])
+            self.pruned_graph.graph.nodes[del_node]['label'] = f'{constant}\\n{del_node}'
+            self.pruned_graph.graph.nodes[del_node]['shape'] = f'square'
+
+            constant_nodes[del_node] =  True if constant.upper() == 'TRUE' else False
+        self.pruned_graph.recompute_properties()
+        return constant_nodes
+
+    def _jinja2_read_wce(self, path):
+        with open(path, 'r') as f:
+            csvreader = csv.reader(f, delimiter=',')
+            for row in csvreader:
+                if row[0].startswith('WCE'):
+                    wce = int(row[1])
+        return wce
+
+    def jinja2_evaluate_randomly_pruned_graph(self,  id=0) -> None:
+        """
+        Generates a Z3Py script with a randomly pruned circuit configuration and saves the output files.
+
+        This function utilizes a Jinja2 template to create a Z3Py script based on a deep copy of the current
+        circuit graph with some gates pruned. The generated Z3Py script includes the approximate logic
+        for the pruned circuit and the exact logic for the original circuit. It then runs the generated
+        Z3Py script to calculate and record the error between the exact and approximate circuits.
+
+        The function follows these main steps:
+            1. Sets up output paths for the Z3Py script and associated report.
+            2. Loads a Jinja2 template to define the structure of the Z3Py script.
+            3. Copies the original circuit graph and removes gates to create a pruned (approximate) version.
+            4. Populates template variables with:
+                - `exact_gate_logic`: Logic for each gate in the exact circuit.
+                - `exact_output_logic`: Logic for each output in the exact circuit.
+                - `approx_gate_logic`: Logic for each gate in the pruned (approximate) circuit.
+                - `approx_output_logic`: Logic for each output in the pruned circuit.
+                - `exact_nodes` and `approx_nodes`: Input, gate, and output nodes for both exact and approximate graphs.
+            5. Renders the Z3Py script based on the template and saves it to the designated output path.
+            6. Runs the generated Z3Py script to evaluate and log error metrics for the pruned circuit.
+            7. Exports the pruned circuit as a .gv file.
+
+        Args:
+            id (int, optional): An identifier for the current instance of the pruned circuit. Defaults to 0.
+
+        Returns:
+            None
+        """
+        constant_nodes = self.jinja2_create_randomly_pruned_graph()
+        folder, extension = OUTPUT_PATH['z3']
+        os.makedirs(f'{folder}/{self.name}', exist_ok=True)
+        self.set_out_path(f'{folder}/{self.name}/{self.name}_random_id{id}.{extension}')
+        folder, extension = OUTPUT_PATH['report']
+        self.set_z3_report(f'{folder}/{self.name}_random_id{id}.{extension}')
+        # Set up Jinja2 environment and load template
+        env = Environment(loader=FileSystemLoader('.'))
+        env.globals['random_choice'] = random.choice  # Pass random.choice as 'random_choice' to Jinja2
+
+        template = env.get_template('src/template.j2')
+
+        # Define the context (values for the template variables)
+
+
+
+        exact_gate_logic = {}
+        for g in self.graph.gate_dict.values():
+            exact_gate_logic[g] = list(self.graph.graph.predecessors(g))
+        exact_output_logic = {}
+        for o in self.graph.output_dict.values():
+            exact_output_logic[o] = list(self.graph.graph.predecessors(o))
+
+        approx_gate_logic = {}
+        for g in self.pruned_graph.gate_dict.values():
+            approx_gate_logic[g] = list(self.pruned_graph.graph.predecessors(g))
+        approx_output_logic = {}
+        for o in self.pruned_graph.output_dict.values():
+            approx_output_logic[o] = list(self.pruned_graph.graph.predecessors(o))
+        exact_nodes = {
+            "inputs": self.graph.input_dict.values(),
+            "gates": self.graph.gate_dict.values(),
+            "outputs": self.graph.output_dict.values(),
+
+        }
+        approx_nodes = {
+            "gates": self.pruned_graph.gate_dict.values(),
+            "outputs": self.pruned_graph.output_dict.values()
+        }
+        rendered_code = template.render(exact_nodes=exact_nodes,
+                                        approx_nodes=approx_nodes,
+                                        exact_gate_logic=exact_gate_logic,
+                                        approx_gate_logic=approx_gate_logic,
+                                        exact_output_logic=exact_output_logic,
+                                        approx_output_logic=approx_output_logic,
+                                        report_path=self.z3_report,
+                                        constant_nodes=constant_nodes
+                                        )
+
+
+        with open(self.out_path, "w") as f:
+            f.write(rendered_code)
+        self.run_z3pyscript_random()
+        wce = self._jinja2_read_wce(f'{folder}/{self.name}_random_id{id}.{extension}')
+        folder, extension = OUTPUT_PATH['gv']
+        self.pruned_graph.out_path = f'{folder}/{self.name}_random_id{id}_pp{self.pruned_percentage}_wce{wce}.{extension}'
+        self.pruned_graph.export_graph()
+
+        return None
+
+
+
 
     def label_circuit(self, constant_value: bool = False, partial: bool = False, et: int = -1):
         self.experiment = SINGLE
@@ -644,20 +777,18 @@ class Z3solver:
         predecessors_to_label = list(
             self.graph.graph.predecessors(self.graph.output_dict[1]))
 
-
         if (partial or self.partial) and et != -1:
 
             already_labeled = set()
             output_dict = self.labeling_graph.output_dict
             sorted_output_dict = dict(sorted(output_dict.items()))
 
-
-
             for output_idx in sorted_output_dict:
                 if 2 ** output_idx > et:
                     break
                 else:
-                    predecessors_to_label = list(self.labeling_graph.graph.predecessors(self.labeling_graph.output_dict[output_idx]))
+                    predecessors_to_label = list(
+                        self.labeling_graph.graph.predecessors(self.labeling_graph.output_dict[output_idx]))
 
                     while predecessors_to_label:
                         gate = predecessors_to_label.pop()
@@ -672,12 +803,11 @@ class Z3solver:
                                 predecessors_to_label.extend(list(self.labeling_graph.graph.predecessors(gate)))
             self.run_z3pyscript_labeling()
             self.import_labels(constant_value)
-            
+
             return self.labels
 
         else:
             for key in self.labeling_graph.gate_dict:
-
                 removed_gate = [self.labeling_graph.gate_dict[key]]
 
                 self.create_pruned_z3pyscript_approximate(removed_gate, constant_value)
@@ -686,11 +816,10 @@ class Z3solver:
                 self.create_pruned_z3pyscript_approximate(removed_gate, constant_value)
             self.run_z3pyscript_labeling()
             self.import_labels(constant_value)
-            
+
             return self.labels
 
-    def import_labels(self, constant_value: bool=False) -> Dict:
-
+    def import_labels(self, constant_value: bool = False) -> Dict:
 
         label_dict: Dict[str, int] = {}
         folder, extension = OUTPUT_PATH['report']
@@ -699,7 +828,8 @@ class Z3solver:
         # print(f'{all_dirs = }')
         relevant_dir = None
         for dir in all_dirs:
-            if re.search(f'{self.approximate_benchmark}_labeling', dir) and os.path.isdir(f'{folder}/{dir}') and re.search(f'{constant_value}', dir):
+            if re.search(f'{self.approximate_benchmark}_labeling', dir) and os.path.isdir(
+                    f'{folder}/{dir}') and re.search(f'{constant_value}', dir):
                 relevant_dir = f'{folder}/{dir}'
 
         all_csv = [f for f in os.listdir(relevant_dir)]
@@ -711,14 +841,14 @@ class Z3solver:
                     csvreader = csv.reader(r)
                     for line in csvreader:
                         if re.search(WCE, line[0]):
-                            gate_wce = int(line[1])
+                            print(f'{line}')
+                            gate_wce = float(line[1])
 
                             label_dict[gate_label] = gate_wce
                             self.append_label(gate_label, gate_wce)
+
+        print(f'{label_dict = }')
         return label_dict
-
-
-
 
     # TODO
     # Deprecated
@@ -811,7 +941,6 @@ class Z3solver:
             else:
                 self.set_out_path(
                     f'{folder}/{self.approximate_benchmark}_{self.experiment}_{self.metric}_{self.strategy}.{extension}')
-
 
         import_string = self.create_imports()
         abs_function = self.create_abs_function()
@@ -1079,16 +1208,17 @@ class Z3solver:
         self.approximate_graph.set_gate_dict(self.approximate_graph.extract_gates())
         self.approximate_graph.set_constant_dict(self.approximate_graph.extract_constants())
 
-    def create_pruned_graph_approximate(self, gates: list, constant_value: bool =False):
+    def create_pruned_graph_approximate(self, gates: list, constant_value: bool = False):
 
         tmp_graph = copy.deepcopy(self.labeling_graph)
         self.set_approximate_graph(tmp_graph)
         mapping_dict = {}
         for gate in gates:
-            if self.labeling_graph.is_pi(gate) or self.labeling_graph.is_cleaned_pi(gate) or self.labeling_graph.is_pruned_pi(gate):
+            if self.labeling_graph.is_pi(gate) or self.labeling_graph.is_cleaned_pi(
+                    gate) or self.labeling_graph.is_pruned_pi(gate):
                 mapping_dict[gate] = f'{gate}'
         for gate in gates:
-            self.approximate_graph.graph.nodes[gate][PRUNED] =  constant_value
+            self.approximate_graph.graph.nodes[gate][PRUNED] = constant_value
         self.approximate_graph.set_graph(nx.relabel_nodes(self.approximate_graph.graph, mapping_dict))
         self.relabel_approximate_graph()
         self.approximate_graph.set_input_dict(self.approximate_graph.extract_inputs())
@@ -1221,8 +1351,6 @@ class Z3solver:
             loop += f"{TAB}import math\n"
             loop += f"{TAB}stats['et'] = math.floor((float(upper_bound + lower_bound) / 2) * {10 ** self.precision}) / {10 ** self.precision}\n"
 
-
-
         # Check termination
         if self.metric == WAE:
             loop += f"{TAB}if upper_bound - lower_bound <= 1:\n" \
@@ -1314,7 +1442,6 @@ class Z3solver:
 
         loop += f'while(not foundWCE):\n'
 
-
         if self.metric == WAE:
             loop += f"{TAB}stats['et'] = (upper_bound + lower_bound) // 2\n"
         elif self.metric == WHD:
@@ -1322,8 +1449,6 @@ class Z3solver:
         elif self.metric == WRE:
             loop += f"{TAB}import math\n"
             loop += f"{TAB}stats['et'] = math.floor((float(upper_bound + lower_bound) / 2) * {10 ** self.precision}) / {10 ** self.precision}\n"
-
-
 
         # Check termination
         if self.metric == WAE:
@@ -1368,9 +1493,8 @@ class Z3solver:
         loop += f'{TAB}start_iteration = time.time()\n' \
                 f'{TAB}s.push()\n'
         if self.metric == WAE or self.metric == WRE:
-                loop += f'{TAB}s.add(f_exact(exact_out) == exact_out)\n' \
-                        f'{TAB}s.add(f_approx(approx_out) == approx_out)\n'
-
+            loop += f'{TAB}s.add(f_exact(exact_out) == exact_out)\n' \
+                    f'{TAB}s.add(f_approx(approx_out) == approx_out)\n'
 
         if self.metric == WAE:
             loop += f'{TAB}s.add(f_error(exact_out, approx_out) == exact_out - approx_out)\n' \
@@ -1468,9 +1592,14 @@ class Z3solver:
             # TODO
         elif self.metric == WRE:
             if self.optimization == MAXIMIZE and (self.strategy != BISECTION):
-                loop += f'{TAB}s.add(f_error(exact_out, approx_out) == z3_abs(exact_out - approx_out) / (z3_abs(exact_out) + z3_abs(1.0))  )\n' \
-                        f"{TAB}s.add(z3_abs(f_error(exact_out, approx_out)) > stats['et'])\n" \
-                        f"{TAB}s.maximize(z3_abs(f_error(exact_out, approx_out)))\n"
+                if self.style == 'max':
+                    loop += f'{TAB}s.add(f_error(exact_out, approx_out) == z3_abs(exact_out - approx_out) / (z3_abs(exact_out) + z3_abs(1.0))  )\n' \
+                            f"{TAB}s.add(z3_abs(f_error(exact_out, approx_out)) > stats['et'])\n" \
+                            f"{TAB}s.maximize(z3_abs(f_error(exact_out, approx_out)))\n"
+                if self.style == 'min':
+                    loop += f'{TAB}s.add(f_error(exact_out, approx_out) == z3_abs(exact_out - approx_out) / (z3_abs(exact_out) + z3_abs(1.0))  )\n' \
+                            f'{TAB}s.add(z3_abs(f_error(exact_out, approx_out)) > 0)\n' \
+                            f'{TAB}s.minimize(z3_abs(f_error(exact_out, approx_out)))\n'
             else:
                 loop += f'{TAB}s.add(f_error(exact_out, approx_out) == z3_abs(exact_out - approx_out) / (z3_abs(exact_out) + z3_abs(1.0))  )\n' \
                         f"{TAB}s.add(z3_abs(f_error(exact_out, approx_out)) > stats['et'])\n"
@@ -1507,7 +1636,6 @@ class Z3solver:
         elif self.metric == WRE:
             if_sat += f"{TAB}{TAB}returned_value = ((returned_model[f_error].else_value().as_decimal({self.precision})))\n" \
                       f"{TAB}{TAB}returned_value_reval = ((returned_model.evaluate(f_error(exact_out, approx_out)).as_decimal({self.precision})))\n"
-
 
         # Double-check
         if_sat += f"{TAB}{TAB}if returned_value == returned_value_reval:\n" \
@@ -1565,7 +1693,6 @@ class Z3solver:
         elif self.metric == WHD:
             f"{TAB}{TAB}print(f\"{{returned_model[f_error].else_value() = }}\")\n"
 
-
         if self.metric == WAE:
             if_sat += f"{TAB}{TAB}returned_value = abs(int(returned_model[f_error].else_value().as_long()))\n" \
                       f"{TAB}{TAB}returned_value_reval = abs(int(returned_model.evaluate(f_error(exact_out, approx_out)).as_long()))\n"
@@ -1595,7 +1722,6 @@ class Z3solver:
                       f"{TAB}{TAB}{TAB}returned_value = abs(float(returned_value[:-1])) + 10 ** -(2)\n" \
                       f"{TAB}{TAB}else:\n" \
                       f"{TAB}{TAB}{TAB}returned_value = abs(float(returned_value))\n"
-
 
         if self.metric == WAE:
             if_sat += f"{TAB}{TAB}if upper_bound - lower_bound <= 1:\n" \
@@ -1632,13 +1758,11 @@ class Z3solver:
                   f"{TAB}{TAB}returned_model = s.model()\n" \
                   f"{TAB}{TAB}print(f'{{returned_model = }}')\n"
         if self.metric == WAE or self.metric == WRE:
-                  f"{TAB}{TAB}print(f\"{{returned_model[f_exact].else_value() = }}\")\n" \
-                  f"{TAB}{TAB}print(f\"{{returned_model[f_approx].else_value() = }}\")\n" \
-                  f"{TAB}{TAB}print(f\"{{returned_model[f_error].else_value() = }}\")\n"
+            f"{TAB}{TAB}print(f\"{{returned_model[f_exact].else_value() = }}\")\n" \
+            f"{TAB}{TAB}print(f\"{{returned_model[f_approx].else_value() = }}\")\n" \
+            f"{TAB}{TAB}print(f\"{{returned_model[f_error].else_value() = }}\")\n"
         elif self.metric == WHD:
             f"{TAB}{TAB}print(f\"{{returned_model[f_error].else_value() = }}\")\n"
-
-
 
         if self.metric == WAE:
             if_sat += f"{TAB}{TAB}returned_value = abs(int(returned_model[f_error].else_value().as_long()))\n" \
@@ -1646,7 +1770,7 @@ class Z3solver:
         elif self.metric == WHD:
             if_sat += f"{TAB}{TAB}returned_value = abs(int(returned_model[f_error].else_value().as_long()))\n"
 
-            if_sat +=  f"{TAB}{TAB}returned_value_reval = abs(int(returned_model.evaluate(f_error("
+            if_sat += f"{TAB}{TAB}returned_value_reval = abs(int(returned_model.evaluate(f_error("
             for i in range(self.graph.num_outputs):
                 if i == self.graph.num_outputs - 1:
                     if_sat += f"o{i}_{XOR}_{INT})).as_long()))\n"
@@ -1686,11 +1810,11 @@ class Z3solver:
 
         if self.style == 'max':
             if_sat += f"{TAB}{TAB}if stats['et'] == max:\n" \
-                        f"{TAB}{TAB}{TAB}foundWCE = True\n" \
-                        f"{TAB}{TAB}{TAB}stats['wce'] = stats['et']\n"
+                      f"{TAB}{TAB}{TAB}foundWCE = True\n" \
+                      f"{TAB}{TAB}{TAB}stats['wce'] = stats['et']\n"
         elif self.style == 'min':
-            if_sat +=   f"{TAB}{TAB}foundWCE = True\n" \
-                        f"{TAB}{TAB}stats['wce'] = stats['et']\n"
+            if_sat += f"{TAB}{TAB}foundWCE = True\n" \
+                      f"{TAB}{TAB}stats['wce'] = stats['et']\n"
 
         return if_sat
 
@@ -1780,11 +1904,11 @@ class Z3solver:
                     f"{TAB}{TAB}stats['num_unsats'] += 1\n" \
                     f"{TAB}{TAB}stats['unsat_runtime'] += (end_iteration - start_iteration)\n"
         if self.style == 'max':
-                    if_unsat +=f"{TAB}{TAB}stats['wce'] = stats['et']\n" \
-                               f"{TAB}s.pop()\n"
+            if_unsat += f"{TAB}{TAB}stats['wce'] = stats['et']\n" \
+                        f"{TAB}s.pop()\n"
         elif self.style == 'min':
-                    if_unsat += f"{TAB}{TAB}stats['wce'] = 0\n" \
-                                f"{TAB}s.pop()\n"
+            if_unsat += f"{TAB}{TAB}stats['wce'] = 0\n" \
+                        f"{TAB}s.pop()\n"
 
         return if_unsat
 
@@ -2020,8 +2144,6 @@ class Z3solver:
         output_declaration = ''
         # print(f'{self.graph.output_dict = }')
 
-
-
         for i in range(self.graph.num_outputs):
             output_declaration += f"exact_out{i}=Int('exact_out{i}')\n"
             output_declaration += f"exact_out{i}={self.graph.output_dict[i]}*{2 ** i}*2/2\n"
@@ -2066,13 +2188,11 @@ class Z3solver:
         for i in range(self.graph.num_outputs):
             xor_miter_declaration += f"{MITER}_o{i}_{XOR} = {Z3BOOL}('o{i}_{XOR}')\n"
 
-
         # o0_xor = Xor(g27, a27)
         # o1_xor = Xor(g105, a105)
         # o2_xor = Xor(g99, a99)
         for i in range(self.graph.num_outputs):
             xor_miter_declaration += f"o{i}_{XOR} = {Z3XOR}({self.graph.output_dict[i]}, app_{self.graph.output_dict[i]})\n"
-
 
         # o0_xor_int = Int('o0_xor_int')
         # o0_xor_int = o0_xor * 2 / 2
@@ -2085,10 +2205,6 @@ class Z3solver:
                                      f"o{i}_{XOR}_{INT} = o{i}_{XOR} * 2/2\n"
 
         return xor_miter_declaration
-
-
-
-
 
     def declare_original_function(self):
         exact_function = ''
@@ -2152,10 +2268,10 @@ class Z3solver:
     # TODO: decorators-----------------------------
     def run_z3pyscript_qor(self):
         with open(self.z3_log_path, 'w') as f:
-            process = subprocess.run([PYTHON3, self.out_path],  stderr=PIPE, stdout=PIPE)
+            process = subprocess.run([PYTHON3, self.out_path], stderr=PIPE)
 
     def run_z3pyscript_labeling(self):
-          # Get the number of CPUs
+        # Get the number of CPUs
         active_procs = []
         if self.parallel:
             num_workers = multiprocessing.cpu_count()
@@ -2197,14 +2313,14 @@ class Z3solver:
     def run_z3pyscript_labeling_old(self):
 
         if self.parallel:
-            print(Fore.LIGHTBLUE_EX + f'Labeling (explicit & parallel)... ', end=''  + Style.RESET_ALL)
-            procs_list = [Popen([PYTHON3, pyscript], stderr=PIPE, stdout=PIPE) for pyscript in self.pyscript_files_for_labeling]
+            print(Fore.LIGHTBLUE_EX + f'Labeling (explicit & parallel)... ', end='' + Style.RESET_ALL)
+            procs_list = [Popen([PYTHON3, pyscript], stderr=PIPE, stdout=PIPE) for pyscript in
+                          self.pyscript_files_for_labeling]
             for proc in procs_list:
                 proc.wait()
             print(Fore.LIGHTBLUE_EX + f'Done' + Style.RESET_ALL)
         else:
             print(Fore.LIGHTBLUE_EX + f'Labeling (explicit & sequential)... ', end='' + Style.RESET_ALL)
-
 
             for pyscript in self.pyscript_files_for_labeling:
                 with open(self.z3_log_path, 'w') as f:
@@ -2214,13 +2330,19 @@ class Z3solver:
                     if process.stderr:
                         print(Fore.RED + f'ERROR!!! cannot run {pyscript} properly!')
                         print(f'{process.stderr.decode()}')
-        # print(f'All pyscript files = {self.pyscript_files_for_labeling = }')
+            # print(f'All pyscript files = {self.pyscript_files_for_labeling = }')
             print(Fore.LIGHTBLUE_EX + f'Done' + Style.RESET_ALL)
-
 
     def run_z3pyscript_random(self):
         with open(self.z3_log_path, 'w') as f:
             process = subprocess.run([PYTHON3, self.out_path], stdout=PIPE, stderr=PIPE)
+
+            # Check for errors
+
+            if process.returncode != 0:
+                print(Fore.RED + f"[E] Error running script: \n{process.stderr.strip()}" + Style.RESET_ALL)
+            else:
+                print(Fore.GREEN + f"[I] Script ran successfully. {self.out_path}" + Style.RESET_ALL)
 
     def run_z3pyscript_test(self):
         with open(self.z3_log_path, 'w') as f:
@@ -2229,5 +2351,3 @@ class Z3solver:
 
         self.set_sample_results(self.import_results())
     # TODO: decorators (end)--------------------------
-
-

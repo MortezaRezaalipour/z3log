@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 import os
 
 
-VERSION = '2.2.13'
+VERSION = '2.2.14'
 DESCRIPTION = """
 Paper Title: ErrorEval: an Open-Source Worst-Case-Error Evaluation Framework for Approximate Computing
 
